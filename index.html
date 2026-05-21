@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8"><link rel="manifest" href="data:application/json;charset=utf-8,%7B%22name%22%3A%22DEAS%20Gestion%20Stocks%22%2C%22short_name%22%3A%22DEAS%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%220d0d1a%22%2C%22theme_color%22%3A%227c3aed%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%2520xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%2520viewBox%3D'0%25200%252064%252064'%253E%253Ccircle%2520cx%3D'32'%2520cy%3D'32'%2520r%3D'32'%2520fill%3D'%25237c3aed'%2F%253E%253Ctext%2520x%3D'32'%2520y%3D'44'%2520text-anchor%3D'middle'%2520font-size%3D'36'%253E%25F0%259F%258F%259B%253C%2Ftext%253E%253C%2Fsvg%253E%22%2C%22sizes%22%3A%22144x144%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%5D%7D"><meta name="theme-color" content="#7c3aed"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="DEAS Stocks">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>🏛 DEAS · Gestion des Stocks</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
@@ -11,7 +11,7 @@
 <style>
 body{margin:0;font-family:Segoe UI,Arial;background:#0d0d1a;color:#e2d9f3}
 header{background:#1e1b2e;box-shadow:0 4px 20px rgba(0,0,0,.3);color:#fff;display:flex;align-items:center;justify-content:space-between;padding:10px 20px;transition:background 0.5s ease,box-shadow 0.5s ease}
-.dashboard{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:24px;padding:24px;animation:fadeIn .6s ease}
+.dashboard{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;padding:16px;animation:fadeIn .6s ease}@media(max-width:600px){.dashboard{grid-template-columns:1fr;padding:12px;gap:12px}}
 .card{background:linear-gradient(135deg,#fff,#f1f7ff);padding:22px;border-radius:18px;box-shadow:0 8px 20px rgba(0,0,0,.15);cursor:pointer;font-size:18px;text-align:center;transition:.25s;position:relative;overflow:hidden}
 .card:hover{transform:translateY(-6px) scale(1.03);box-shadow:0 15px 30px rgba(0,0,0,.25)}
 .card i{background:linear-gradient(135deg,#2c7be5,#00c6ff);color:#fff;padding:15px;border-radius:50%;margin-bottom:12px;display:inline-block;box-shadow:0 5px 12px rgba(0,0,0,.2);transition:.3s}
