@@ -287,14 +287,6 @@ let _supabaseSaving=false;
 let _syncDebounceTimer=null;
 let _firstSyncDone=false;
 function scheduleSyncDebounce(){
-  if(!_firstSyncDone){
-    _firstSyncDone=true;
-    if(!_supabaseSaving){
-      _supabaseSaving=true;
-      supabaseSave(db).catch(e=>console.warn('First sync:',e.message)).finally(()=>{_supabaseSaving=false;});
-    }
-    return;
-  }
   if(_syncDebounceTimer)clearTimeout(_syncDebounceTimer);
   _syncDebounceTimer=setTimeout(async()=>{
     if(!_supabaseSaving){
@@ -302,7 +294,7 @@ function scheduleSyncDebounce(){
       try{await supabaseSave(db);}catch(se){console.warn('⚠️ Supabase sync:',se.message);}
       finally{_supabaseSaving=false;}
     }
-  },60000);
+  },3000);
 }
 async function save(){
   if(_saveTimer){clearTimeout(_saveTimer);_saveTimer=null;}
