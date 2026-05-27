@@ -1202,7 +1202,7 @@ async function hashPassword(password){
   return hashArray.map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
-const CORRECT_HASH='e7b533eb0100ff23e864540bdfaafcb9359c342219f587e2060421794e4a0b75';
+const CORRECT_HASH='8e1bfa9823f15bd913417f4b3afa8b981dfb28fbdd41608044f7ea88b484027e';
 const SALT='DEAS2026_mairie_sel_secret';
 document.addEventListener('contextmenu',e=>e.preventDefault());
 document.addEventListener('keydown',e=>{if(e.key==='F12'||(e.ctrlKey&&e.shiftKey&&['I','J','C'].includes(e.key))||(e.ctrlKey&&e.key==='U'))e.preventDefault();});
