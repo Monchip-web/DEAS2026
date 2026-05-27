@@ -234,8 +234,6 @@ setInterval(async()=>{
           const t=new Date();
           updateSyncIndicator(true,t.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}),t.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}));
           showToast('Sync auto','Nouvelles données reçues ☁️','🔄');
-          // Rafraîchit la vue sans recharger la page
-          if(typeof openDashboard==='function')openDashboard();
         }
         return;
       }
