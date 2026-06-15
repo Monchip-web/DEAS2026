@@ -1451,16 +1451,6 @@ const openEditVaisselleArticle = (id) => editVaisselleArticle(id);
 
 // ── AGENTS ──────────────────────────────────────────────────
 // editAgent : modifier le nom d'un agent existant
-async function editAgent(id){
-  const agent = db.agents.find(a=>a.id===id);
-  if(!agent) return showToast('Introuvable','Agent introuvable','❌');
-  const newName = prompt('Nouveau nom pour "'+agent.name+'" :', agent.name);
-  if(!newName||!newName.trim()) return;
-  agent.name = newName.trim();
-  await save();
-  updAgents();
-  showToast('Agent modifié', agent.name, '✅');
-}
 
 // ============================================================
  (function(){const t=localStorage.getItem('deas_theme');if(t==='dark')document.body.classList.add('dark');})();(function initSplashGrid(){const grid=document.getElementById('splashGrid');if(!grid)return;const colors=['#8b5cf6','#3b82f6','#10b981','#f093fb','#f59e0b','#ef4444','#06b6d4','#a8dadc','#ff6b6b','#22c55e','#fcd34d','#4facfe'];const cells=40;for(let i=0;i<cells;i++){const d=document.createElement('div');d.style.cssText='border-radius:4px;animation:cellPulse '+(1.5+Math.random())+'s ease-in-out infinite;animation-delay:'+(Math.random()*2)+'s;background:'+colors[Math.floor(Math.random()*colors.length)];grid.appendChild(d);}})();(function animSplash(){const mods=['Entretien · Restauration','EPI · Équipements','Animation · Matériel','Épicerie solidaire','Déguisements','Préfa · Mobilier','Vaisselle','Serviettes'];let pct=0,modIdx=0;const pctEl=document.getElementById('splashPct');const modEl=document.getElementById('splashMod');if(!pctEl||!modEl)return;const iv=setInterval(()=>{pct=Math.min(100,pct+2);if(pctEl)pctEl.textContent=pct+'%';if(pct%13===0){modIdx=(modIdx+1)%mods.length;if(modEl)modEl.textContent=mods[modIdx];}if(pct>=100)clearInterval(iv);},50);})();verifyAndInit();requestNotifPermission();setInterval(sendPeremptionNotif,3600000);setTimeout(()=>{_splashLocked=false;const l=document.getElementById('loadingIndicator');if(l&&l.style.display!=='none')l.style.display='none';},10000);
