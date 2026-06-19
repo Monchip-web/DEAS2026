@@ -583,7 +583,74 @@ function showHistoriqueGlobal(){const allMovs=[];const modules=[{key:'entretien'
 // ============ SITES ============
 function renderSites(){document.getElementById("app").innerHTML=`<h3>🏫 Sites</h3><input id="siteName" placeholder="Nom"><select id="siteCat"><option value="">Catégorie</option><option value="ecoles">🏫 Écoles</option><option value="restauration">🍽 Restauration</option><option value="accueil">👶 Accueil</option><option value="alsh">🎯 ALSH</option><option value="lingerie">🧺 Lingerie</option><option value="mairie">🏛 Mairie</option></select><input id="siteCol" type="color"><br><button onclick="addSite()">Ajouter</button><hr><div id="siteList"></div>`;updSites()}
 async function addSite(){const n=document.getElementById("siteName"),c=document.getElementById("siteCat"),col=document.getElementById("siteCol");if(!n.value||!c.value){ showToast('Champ manquant','Nom et catégorie obligatoires','⚠️'); return; }db.sites.push({id:Date.now(),name:n.value,category:c.value,color:col.value});n.value="";c.value="";await save();updSites()}
-function updSites(){const list=document.getElementById("siteList");list.innerHTML="";const m={ecoles:"🏫 Écoles",restauration:"🍽 Restauration",accueil:"👶 Accueil",alsh:"🎯 ALSH",lingerie:"🧺 Lingerie",mairie:"🏛 Mairie"};Object.keys(m).forEach(cat=>{const sites=db.sites.filter(s=>s.category===cat);if(!sites.length)return;const t=document.createElement("h4");t.innerText=m[cat];t.style.marginTop="15px";list.appendChild(t);sites.forEach(s=>{const d=document.createElement("div");d.className="list-item";d.innerHTML=`<span class="tag" style="background:${s.color}">${s.name}</span><button onclick="editSite(${s.id})">✏️</button><button onclick="delSite(${s.id})">🗑</button>`;list.appendChild(d)})})}
+function openFicheSite(siteId){
+  const site=db.sites.find(s=>s.id===siteId);
+  if(!site){showToast('Site introuvable','','❌');return;}
+
+  // Agents affectés à ce site
+  const agents=(db.agents||[]).filter(a=>a.siteId===siteId);
+
+  // Agrégation des mouvements de tous les modules pour ce site
+  const modules=[
+    {key:'entretien',label:'🧹 Entretien',color:'#3b82f6'},
+    {key:'epi',label:'🦺 EPI',color:'#f59e0b'},
+    {key:'animation',label:'🎨 Animation',color:'#ec4899'},
+    {key:'prefa',label:'🍱 Préfa',color:'#22c55e'},
+    {key:'deguisements',label:'🎭 Déguisements',color:'#8b5cf6'}
+  ];
+  let allMouvements=[];
+  modules.forEach(m=>{
+    const mv=(db[m.key]&&db[m.key].mouvements)||[];
+    mv.forEach(x=>{
+      if(typeof x.site==='string'&&x.site.split(' - ')[0]===site.name){
+        allMouvements.push({...x,_module:m.label,_color:m.color});
+      }
+    });
+  });
+  allMouvements.sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const last20=allMouvements.slice(0,20);
+
+  // Stock entretien spécifique livré à ce site (somme des sorties - retours, 90 derniers jours, indicatif)
+  const sorties90j=allMouvements.filter(m=>{
+    const d=new Date(m.date);
+    const diffJours=(new Date()-d)/(1000*60*60*24);
+    return diffJours<=90&&(m.type==='SORTIE'||m.type==='SORTIE_CLASSE');
+  });
+  const totalSorties90j=sorties90j.reduce((s,m)=>s+(m.qty||0),0);
+
+  const agentsHTML=agents.length?agents.map(a=>{
+    const initial=a.name.charAt(0).toUpperCase();
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:10px;margin-bottom:6px"><div style="width:28px;height:28px;border-radius:50%;background:${a.color||site.color};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff;flex-shrink:0">${initial}</div><div style="font-size:13px;font-weight:600;color:#e2d9f3">${a.name}</div></div>`;
+  }).join(''):'<div style="text-align:center;padding:16px;color:#6b5fa0;font-size:12px">Aucun agent affecté</div>';
+
+  const mouvementsHTML=last20.length?last20.map(m=>{
+    const d=new Date(m.date);
+    const dateStr=d.toLocaleDateString('fr-FR')+' '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    const isOut=m.type==='SORTIE'||m.type==='SORTIE_CLASSE'||m.type==='TRANSFERT_CLASSE';
+    const sign=isOut?'-':'+';
+    const signColor=isOut?'#ef4444':'#22c55e';
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid rgba(255,255,255,0.05)"><div style="flex:1"><div style="font-size:12px;font-weight:600;color:#e2d9f3">${m.article||m.name||'—'}</div><div style="font-size:10px;color:#6b5fa0;margin-top:2px">${m._module} · ${dateStr}</div></div><div style="font-size:13px;font-weight:800;color:${signColor}">${sign}${m.qty||0}</div></div>`;
+  }).join(''):'<div style="text-align:center;padding:20px;color:#6b5fa0;font-size:12px">Aucun mouvement enregistré</div>';
+
+  document.body.insertAdjacentHTML('beforeend',`<div id="ficheSiteModal" class="modal-overlay" style="backdrop-filter:blur(8px);z-index:99999"><div class="modal-box" style="max-width:560px;background:linear-gradient(145deg,#1a1333,#120e24);border:1px solid rgba(139,92,246,0.3);color:#e2d9f3;max-height:88vh;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-shrink:0">
+    <div style="width:48px;height:48px;border-radius:14px;background:${site.color};display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">🏫</div>
+    <div style="flex:1"><div style="font-size:18px;font-weight:800;color:#e2d9f3">${site.name}</div><div style="font-size:12px;color:#6b5fa0">${({ecoles:'🏫 Écoles',restauration:'🍽 Restauration',accueil:'👶 Accueil',alsh:'🎯 ALSH',lingerie:'🧺 Lingerie',mairie:'🏛 Mairie'})[site.category]||site.category}</div></div>
+    <button onclick="document.getElementById('ficheSiteModal').remove()" style="background:rgba(239,68,68,0.15);color:#fca5a5;border:none;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;flex-shrink:0">✕</button>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;flex-shrink:0">
+    <div style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.25);border-radius:12px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:800;color:#818cf8">${agents.length}</div><div style="font-size:11px;color:#6b5fa0">Agent(s) affecté(s)</div></div>
+    <div style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.25);border-radius:12px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:800;color:#4ade80">${totalSorties90j}</div><div style="font-size:11px;color:#6b5fa0">Sorties (90j)</div></div>
+  </div>
+  <div style="overflow-y:auto;flex:1">
+    <div style="font-size:12px;font-weight:800;color:#a78bfa;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">👥 Agents affectés</div>
+    ${agentsHTML}
+    <div style="font-size:12px;font-weight:800;color:#a78bfa;text-transform:uppercase;letter-spacing:1px;margin:18px 0 10px 0">📋 Derniers mouvements (tous modules)</div>
+    <div style="background:rgba(0,0,0,0.15);border-radius:12px;overflow:hidden">${mouvementsHTML}</div>
+  </div>
+  </div></div>`);
+}
+function updSites(){const list=document.getElementById("siteList");list.innerHTML="";const m={ecoles:"🏫 Écoles",restauration:"🍽 Restauration",accueil:"👶 Accueil",alsh:"🎯 ALSH",lingerie:"🧺 Lingerie",mairie:"🏛 Mairie"};Object.keys(m).forEach(cat=>{const sites=db.sites.filter(s=>s.category===cat);if(!sites.length)return;const t=document.createElement("h4");t.innerText=m[cat];t.style.marginTop="15px";list.appendChild(t);sites.forEach(s=>{const d=document.createElement("div");d.className="list-item";d.innerHTML=`<span class="tag" style="background:${s.color}">${s.name}</span><button onclick="openFicheSite(${s.id})" style="background:rgba(59,130,246,0.15);color:#60a5fa;border:1px solid rgba(59,130,246,0.3);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">📊 Fiche</button><button onclick="editSite(${s.id})">✏️</button><button onclick="delSite(${s.id})">🗑</button>`;list.appendChild(d)})})}
 async function delSite(id){confirmAction('Supprimer ce site ?',async()=>{db.sites=db.sites.filter(s=>s.id!==id);await save();updSites()});}
 async function editSite(id){const s=db.sites.find(x=>x.id===id);if(!s)return;const n=prompt("Nom:",s.name);if(n===null)return;s.name=n;await save();updSites()}
 
