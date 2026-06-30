@@ -381,6 +381,16 @@ async function generateCatalogue(modules){
   // Stats rapides
   const totalArts=modules.reduce((n,m)=>{
     if(m==='epi')return n+db.epi.articles.length;
+    if(m==='classes'){
+      let c=0;(db.classes?.ecoles||[]).forEach(e=>(e.classes||[]).forEach(cl=>c+=(cl.articles||[]).length));
+      return n+c;
+    }
+    if(m==='alsh'){
+      let c=0;(db.alsh?.sites||[]).forEach(s=>c+=(s.articles||[]).length);
+      return n+c;
+    }
+    if(m==='vaisselle')return n+(db.vaisselle?.articles?.length||0);
+    if(m==='stocktampon')return n+(db.stocktampon?.articles?.length||0);
     return n+(db[m]?.articles?.length||0);
   },0);
 
@@ -428,6 +438,67 @@ async function generateCatalogue(modules){
   doc.setLineWidth(0.5);
   doc.line(70,34,140,34);
 
+  // Helper: récupère les groupes d'articles pour les modules spéciaux (classes, alsh, vaisselle, stocktampon)
+  function getSpecialGroups(mod){
+    const groups=[];
+    if(mod==='classes'){
+      const classes=db.classes;
+      if(classes&&classes.ecoles){
+        classes.ecoles.forEach(ecole=>{
+          const site=db.sites.find(s=>s.id===ecole.siteId);
+          const siteName=site?site.name:'École';
+          (ecole.classes||[]).forEach(classe=>{
+            if(classe.articles&&classe.articles.length){
+              groups.push({label:siteName+' — '+classe.nom,articles:classe.articles.map(a=>({name:a.nom,qty:a.qty,photo:a.photo,ref:''}))});
+            }
+          });
+        });
+      }
+    }else if(mod==='alsh'){
+      const alsh=db.alsh;
+      if(alsh&&alsh.sites){
+        alsh.sites.forEach(site=>{
+          const siteObj=db.sites.find(s=>s.id===site.siteId);
+          const siteName=siteObj?siteObj.name:(site.name||'ALSH');
+          if(site.articles&&site.articles.length){
+            groups.push({label:siteName,articles:site.articles.map(a=>({name:a.nom||a.name,qty:a.qty,photo:a.photo,ref:''}))});
+          }
+        });
+      }
+    }else if(mod==='vaisselle'){
+      const v=db.vaisselle;
+      if(v&&v.articles&&v.articles.length){
+        groups.push({label:'Articles disponibles',articles:v.articles.map(a=>({name:a.nom||a.name,qty:0,photo:a.photo,ref:''}))});
+      }
+      if(v&&v.restaurants){
+        v.restaurants.forEach(resto=>{
+          const restoArticles=(v.articles||[]).filter(a=>a.stocks&&a.stocks.find(s=>s.restaurantId===resto.id));
+          if(restoArticles.length){
+            groups.push({label:resto.name,articles:restoArticles.map(a=>{
+              const stock=a.stocks.find(s=>s.restaurantId===resto.id);
+              return {name:a.nom||a.name,qty:stock?stock.qty:0,photo:a.photo,ref:''};
+            })});
+          }
+        });
+      }
+    }else if(mod==='stocktampon'){
+      const st=db.stocktampon;
+      if(st&&st.restaurants){
+        st.restaurants.forEach(resto=>{
+          const restoArticles=(st.articles||[]).filter(a=>a.stocks&&a.stocks.find(s=>s.restaurantId===resto.id));
+          if(restoArticles.length){
+            groups.push({label:resto.name,articles:restoArticles.map(a=>{
+              const stock=a.stocks.find(s=>s.restaurantId===resto.id);
+              const totalQty=stock?(stock.batches||[]).reduce((s,b)=>s+b.qty,0):0;
+              return {name:a.name,qty:totalQty,photo:a.photo,ref:''};
+            })});
+          }
+        });
+      }
+    }
+    return groups;
+  }
+
   const sommaire=[];
   let pageCount=3; // couverture + sommaire + pages contenu
 
@@ -436,6 +507,19 @@ async function generateCatalogue(modules){
   for(const mod of modules){
     const cfg=getModuleCfg(mod);
     if(!cfg)continue;
+    if(cfg.special){
+      const groups=getSpecialGroups(mod);
+      const startPage=pageCount;
+      groups.forEach(g=>{
+        const pages=Math.ceil(g.articles.length/4);
+        if(pages>0){
+          sommaire.push({label:cfg.name+' — '+g.label,page:pageCount,color:cfg.color});
+          pageCount+=pages;
+        }
+      });
+      moduleData.push({mod,cfg,cats:[],groups,startPage});
+      continue;
+    }
     const cats=[...new Set(cfg.articles.map(a=>a.category||'Sans catégorie'))];
     const startPage=pageCount;
     // Chaque catégorie = ~1 page par 4 articles (grille 2x2)
@@ -483,7 +567,72 @@ async function generateCatalogue(modules){
   doc.text('Gestion des Stocks DEAS',105,H-4,{align:'center'});
 
   // ─── PAGES CONTENU ────────────────────────────
-  for(const {mod,cfg,cats} of moduleData){
+  for(const {mod,cfg,cats,groups} of moduleData){
+    // Modules spéciaux (classes, alsh, vaisselle, stocktampon) : par groupe (école/classe ou restaurant)
+    if(cfg.special&&groups){
+      for(const g of groups){
+        if(!g.articles.length)continue;
+        const chunks=[];
+        for(let i=0;i<g.articles.length;i+=4)chunks.push(g.articles.slice(i,i+4));
+        for(let ci=0;ci<chunks.length;ci++){
+          doc.addPage();
+          drawBg(doc,[13,13,26],[20,12,40]);
+          const [hr,hg,hb]=hexRgb(cfg.color);
+          doc.setFillColor(hr,hg,hb);
+          doc.rect(0,0,W,22,'F');
+          const lum=(hr*299+hg*587+hb*114)/1000;
+          const textCol=lum>150?[20,20,40]:[255,255,255];
+          doc.setTextColor(...textCol);
+          doc.setFontSize(15);doc.setFont(undefined,'bold');
+          doc.text(cfg.name.toUpperCase(),14,10);
+          doc.setFontSize(10);doc.setFont(undefined,'normal');
+          doc.text(g.label.toUpperCase(),14,18);
+          if(ci>0){doc.setFontSize(8);doc.text('(suite)',14+doc.getTextWidth(g.label.toUpperCase())+4,18);}
+          doc.setFontSize(9);
+          doc.text('p.'+doc.getNumberOfPages(),W-14,14,{align:'right'});
+
+          const chunk=chunks[ci];
+          const positions=[[10,28],[110,28],[10,162],[110,162]];
+          for(let ai=0;ai<chunk.length;ai++){
+            const art=chunk[ai];
+            const [ax,ay]=positions[ai];
+            const AW=90,AH=125;
+            doc.setFillColor(255,255,255);
+            doc.roundedRect(ax,ay,AW,AH,4,4,'F');
+            doc.setFillColor(hr,hg,hb);
+            doc.roundedRect(ax,ay,AW,8,4,4,'F');
+            doc.rect(ax,ay+4,AW,4,'F');
+            let imgLoaded=false;
+            if(art.photo){
+              try{const imgData=await loadImgForPDF(art.photo);if(imgData){doc.addImage(imgData,ax+5,ay+11,AW-10,55,'','FAST');imgLoaded=true;}}catch(e){}
+            }
+            if(!imgLoaded){
+              doc.setFillColor(240,238,255);doc.rect(ax+5,ay+11,AW-10,55,'F');
+              doc.setFontSize(28);doc.setTextColor(180,170,220);doc.text('📦',ax+AW/2-4,ay+45);
+            }
+            doc.setFontSize(9);doc.setFont(undefined,'bold');doc.setTextColor(20,20,40);
+            const nameLines=doc.splitTextToSize(art.name||'-',AW-8);
+            doc.text(nameLines.slice(0,2),ax+AW/2,ay+74,{align:'center'});
+            const isRupture=(art.qty||0)===0;
+            const stockColor=isRupture?[220,38,38]:[5,150,105];
+            const stockLabel=isRupture?'RUPTURE':'En stock';
+            doc.setFillColor(...stockColor);
+            doc.roundedRect(ax+8,ay+88,AW-16,12,3,3,'F');
+            doc.setTextColor(255,255,255);doc.setFontSize(9);doc.setFont(undefined,'bold');
+            doc.text((art.qty||0).toString()+' '+stockLabel,ax+AW/2,ay+96,{align:'center'});
+          }
+
+          doc.setFillColor(...DARK);
+          doc.rect(0,H-10,W,10,'F');
+          doc.setFillColor(hr,hg,hb);
+          doc.rect(0,H-10,3,10,'F');
+          doc.setTextColor(107,95,160);doc.setFontSize(7);doc.setFont(undefined,'normal');
+          doc.text('DEAS Stocks — '+cfg.name.toUpperCase()+' / '+g.label,14,H-3);
+          doc.text('p.'+doc.getNumberOfPages(),W-10,H-3,{align:'right'});
+        }
+      }
+      continue;
+    }
     for(const cat of cats){
       const arts=cfg.articles.filter(a=>(a.category||'Sans catégorie')===cat);
       const catName=getCatName(cat)||cat;
@@ -643,7 +792,11 @@ function getModuleCfg(mod){
     animation:{name:'Animation',articles:db.animation?.articles||[],color:'#ec4899'},
     prefa:{name:'Prefa',articles:db.prefa?.articles||[],color:'#a8dadc'},
     deguisements:{name:'Deguisements',articles:db.deguisements?.articles||[],color:'#ff6b6b'},
-    epicerie:{name:'Epicerie',articles:db.epicerie?.articles||[],color:'#22c55e'}
+    epicerie:{name:'Epicerie',articles:db.epicerie?.articles||[],color:'#22c55e'},
+    classes:{name:'Classes',articles:[],color:'#facc15',special:'classes'},
+    alsh:{name:'ALSH',articles:[],color:'#fb923c',special:'alsh'},
+    vaisselle:{name:'Vaisselle',articles:[],color:'#06b6d4',special:'vaisselle'},
+    stocktampon:{name:'Stock Tampon',articles:[],color:'#a78bfa',special:'stocktampon'}
   };
   return cfgs[mod]||null;
 }
@@ -662,7 +815,7 @@ function hexRgb(hex){
 }
 
 function openCatalogueModal(){
-  document.body.insertAdjacentHTML('beforeend',`<div id="catalogueModal" class="modal-overlay" style="backdrop-filter:blur(8px);z-index:99999"><div class="modal-box" style="max-width:440px;background:linear-gradient(145deg,#1a1333,#120e24);border:1px solid rgba(139,92,246,0.3);color:#e2d9f3"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><div><h3 style="margin:0;color:#a78bfa;font-size:18px">📚 Catalogue Canva</h3><div style="font-size:11px;color:#6b5fa0;margin-top:4px">PDF illustre style magazine</div></div><button onclick="document.getElementById('catalogueModal').remove()" style="background:rgba(239,68,68,0.15);color:#fca5a5;border:none;width:30px;height:30px;border-radius:50%;cursor:pointer">✕</button></div><div style="font-size:12px;font-weight:700;color:#6b5fa0;margin-bottom:10px;text-transform:uppercase;letter-spacing:1px">Modules a inclure</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:20px"><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(139,92,246,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(139,92,246,0.2)"><input type="checkbox" checked class="catMod" value="entretien" style="accent-color:#7c3aed">🧹 Entretien</label><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(99,102,241,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(99,102,241,0.2)"><input type="checkbox" checked class="catMod" value="epi" style="accent-color:#6366f1">🦺 EPI</label><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(236,72,153,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(236,72,153,0.2)"><input type="checkbox" class="catMod" value="animation" style="accent-color:#ec4899">🎨 Animation</label><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(168,218,220,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(168,218,220,0.2)"><input type="checkbox" checked class="catMod" value="prefa" style="accent-color:#a8dadc">🏗 Prefa</label><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(255,107,107,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(255,107,107,0.2)"><input type="checkbox" class="catMod" value="deguisements" style="accent-color:#ff6b6b">🎭 Deguisements</label><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(34,197,94,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(34,197,94,0.2)"><input type="checkbox" class="catMod" value="epicerie" style="accent-color:#22c55e">🥫 Epicerie</label></div><div style="background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2);border-radius:10px;padding:12px;margin-bottom:16px;font-size:11px;color:#8b7fb5">⚠️ La generation peut prendre 1 a 2 minutes selon le nombre de photos</div><button onclick="const mods=Array.from(document.querySelectorAll('.catMod:checked')).map(c=>c.value);if(!mods.length){showToast('Aucun module','Selectionnez au moins un module','⚠️');return;}document.getElementById('catalogueModal').remove();generateCatalogue(mods);" style="width:100%;background:linear-gradient(135deg,#7c3aed,#4facfe);color:#fff;border:none;padding:14px;border-radius:12px;cursor:pointer;font-weight:700;font-size:15px">📥 Generer le catalogue</button></div></div>`);
+  document.body.insertAdjacentHTML('beforeend',`<div id="catalogueModal" class="modal-overlay" style="backdrop-filter:blur(8px);z-index:99999"><div class="modal-box" style="max-width:440px;background:linear-gradient(145deg,#1a1333,#120e24);border:1px solid rgba(139,92,246,0.3);color:#e2d9f3"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><div><h3 style="margin:0;color:#a78bfa;font-size:18px">📚 Catalogue Canva</h3><div style="font-size:11px;color:#6b5fa0;margin-top:4px">PDF illustre style magazine</div></div><button onclick="document.getElementById('catalogueModal').remove()" style="background:rgba(239,68,68,0.15);color:#fca5a5;border:none;width:30px;height:30px;border-radius:50%;cursor:pointer">✕</button></div><div style="font-size:12px;font-weight:700;color:#6b5fa0;margin-bottom:10px;text-transform:uppercase;letter-spacing:1px">Modules a inclure</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:20px"><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(139,92,246,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(139,92,246,0.2)"><input type="checkbox" checked class="catMod" value="entretien" style="accent-color:#7c3aed">🧹 Entretien</label><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(99,102,241,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(99,102,241,0.2)"><input type="checkbox" checked class="catMod" value="epi" style="accent-color:#6366f1">🦺 EPI</label><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(236,72,153,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(236,72,153,0.2)"><input type="checkbox" class="catMod" value="animation" style="accent-color:#ec4899">🎨 Animation</label><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(168,218,220,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(168,218,220,0.2)"><input type="checkbox" checked class="catMod" value="prefa" style="accent-color:#a8dadc">🏗 Prefa</label><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(255,107,107,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(255,107,107,0.2)"><input type="checkbox" class="catMod" value="deguisements" style="accent-color:#ff6b6b">🎭 Deguisements</label><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(34,197,94,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(34,197,94,0.2)"><input type="checkbox" class="catMod" value="epicerie" style="accent-color:#22c55e">🥫 Epicerie</label><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(250,204,21,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(250,204,21,0.2)"><input type="checkbox" class="catMod" value="classes" style="accent-color:#facc15">🏫 Classes</label><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(251,146,60,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(251,146,60,0.2)"><input type="checkbox" class="catMod" value="alsh" style="accent-color:#fb923c">🎯 ALSH</label><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(6,182,212,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(6,182,212,0.2)"><input type="checkbox" class="catMod" value="vaisselle" style="accent-color:#06b6d4">🍽 Vaisselle</label><label style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(167,139,250,0.1);border-radius:10px;cursor:pointer;border:1px solid rgba(167,139,250,0.2)"><input type="checkbox" class="catMod" value="stocktampon" style="accent-color:#a78bfa">📦 Stock Tampon</label></div><div style="background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2);border-radius:10px;padding:12px;margin-bottom:16px;font-size:11px;color:#8b7fb5">⚠️ La generation peut prendre 1 a 2 minutes selon le nombre de photos</div><button onclick="const mods=Array.from(document.querySelectorAll('.catMod:checked')).map(c=>c.value);if(!mods.length){showToast('Aucun module','Selectionnez au moins un module','⚠️');return;}document.getElementById('catalogueModal').remove();generateCatalogue(mods);" style="width:100%;background:linear-gradient(135deg,#7c3aed,#4facfe);color:#fff;border:none;padding:14px;border-radius:12px;cursor:pointer;font-weight:700;font-size:15px">📥 Generer le catalogue</button></div></div>`);
 }
 
 function updateSyncIndicator(ok,time,date){
@@ -1202,15 +1355,26 @@ function toggleLotRow(artId){const cb=document.getElementById(`lot-check-${artId
 function toggleAllLot(checked){db.entretien.articles.filter(a=>a.qty>0).forEach(a=>{const cb=document.getElementById(`lot-check-${a.id}`);if(cb){cb.checked=checked;toggleLotRow(a.id);}});}
 function updateLotResume(){const resume=document.getElementById('lotResume');if(!resume)return;const lines=[];db.entretien.articles.forEach(a=>{const cb=document.getElementById(`lot-check-${a.id}`);const inp=document.getElementById(`lot-qty-${a.id}`);if(cb?.checked&&inp?.value){const qty=parseInt(inp.value)||0;if(qty>0)lines.push(`• ${a.name} : <strong>${qty}</strong>`)}});if(lines.length){resume.style.display='block';resume.innerHTML='<strong>📋 Récapitulatif :</strong><br>'+lines.join('<br>');}else{resume.style.display='none';}}
 async function saveDistribLot(){const siteId=Number(document.getElementById('lotSite')?.value);if(!siteId){ showToast('Site manquant','Sélectionnez un site','⚠️'); return; }const site=db.sites.find(s=>s.id===siteId);const distributions=[];let errors=[];db.entretien.articles.forEach(a=>{const cb=document.getElementById(`lot-check-${a.id}`);const inp=document.getElementById(`lot-qty-${a.id}`);if(cb?.checked){const qty=parseInt(inp?.value)||0;if(qty<=0){errors.push(`Quantité invalide pour "${a.name}"`);return}if(qty>a.qty){errors.push(`Stock insuffisant pour "${a.name}" (dispo: ${a.qty})`);return}distributions.push({article:a,qty});}});if(errors.length)return showToast('Erreurs',errors.length+' erreur(s)','❌');if(!distributions.length){ showToast('Sélection vide','Cochez au moins un article','⚠️'); return; }distributions.forEach(d=>{d.article.qty-=d.qty;db.entretien.mouvements.push({type:'SORTIE',articleId:d.article.id,article:d.article.name,ref:d.article.ref,qty:d.qty,site:site.name,date:new Date().toISOString(),role:isGuest()?'Invité':'Admin'});});await save();document.getElementById('distribLotOverlay').remove();renderEntretien();playBip('ok');if(navigator.vibrate)navigator.vibrate([60,30,60]);showToast('Distribution effectuée !','Vers '+site.name+' — '+distributions.length+' article(s)','🚚');lanceConfettis();}
-async function quickGenerateAlertesPDF(){const mods=Array.from(document.querySelectorAll('.quickMod:checked')).map(c=>c.value);if(!mods.length){showToast('Module manquant','Sélectionnez au moins un module','⚠️');return;}showSplashPDF();await new Promise(r=>setTimeout(r,400));const{jsPDF}=window.jspdf;const doc=new jsPDF();let y=20;doc.setFontSize(18);doc.setFont(undefined,'bold');doc.setTextColor(220,38,38);doc.text('Etat du Stock - Actifs',105,y,{align:'center'});y+=8;doc.setFontSize(9);doc.setFont(undefined,'normal');doc.setTextColor(100,100,100);doc.text('Généré le '+new Date().toLocaleDateString()+' à '+new Date().toLocaleTimeString(),105,y,{align:'center'});y+=12;const etatLabel=(qty,seuil)=>qty===0?'RUPTURE':qty<=seuil?'STOCK BAS':'OK';let hasData=false;const modsStock=[{key:'entretien',label:'ENTRETIEN (actifs)',color:[44,123,229],rows:()=>{const r=[];const cats=[...new Set(db.entretien.articles.filter(a=>a.actif!==false).map(a=>a.category))];cats.forEach(catId=>{const cat=db.categories.find(c=>c.id===catId);const arts=db.entretien.articles.filter(a=>a.category===catId&&a.actif!==false);if(!arts.length)return;r.push([{content:(cat?cat.name:catId).toUpperCase(),colSpan:6,styles:{fillColor:[45,31,94],textColor:[196,181,253],fontStyle:'bold',fontSize:9}}]);arts.forEach(a=>{const fourn=(db.fournisseurs||[]).find(f=>f.id===a.fournisseurId);const fournInitial=fourn?fourn.nom.charAt(0).toUpperCase():'?';r.push([a.ref||'-',a.name,fourn?fournInitial:'-',a.qty.toString(),a.seuil.toString(),etatLabel(a.qty,a.seuil)]);});});return r;}},{key:'epi',label:'EPI',color:[102,126,234],rows:()=>{const r=[];db.epi.articles.forEach(a=>{Object.entries(a.sizes||{}).forEach(([s,v])=>{r.push([a.ref||'-',a.name+' T.'+s,v.qty.toString(),v.seuil.toString(),etatLabel(v.qty,v.seuil)])})});return r;}},{key:'animation',label:'ANIMATION',color:[240,147,251],rows:()=>db.animation.articles.map(a=>['-',a.name,a.qty.toString(),a.seuil.toString(),etatLabel(a.qty,a.seuil)])},{key:'prefa',label:'🏗 PRÉFA',color:[168,218,220],rows:()=>db.prefa.articles.map(a=>['-',a.name,a.qty.toString(),a.seuil.toString(),etatLabel(a.qty,a.seuil)])},{key:'deguisements',label:'🎭 DÉGUISEMENTS',color:[255,107,107],rows:()=>db.deguisements.articles.map(a=>['-',a.name,a.qty.toString(),a.seuil.toString(),etatLabel(a.qty,a.seuil)])}];modsStock.forEach(mod=>{if(!mods.includes(mod.key))return;const rows=mod.rows();if(!rows.length)return;hasData=true;if(y>240){doc.addPage();y=20;}doc.setFontSize(12);doc.setFont(undefined,'bold');doc.setTextColor(mod.color[0],mod.color[1],mod.color[2]);doc.setFont(undefined,'bold');doc.text(mod.label,14,y);doc.setTextColor(0,0,0);y+=2;const hasPhotos=mod.key==='entretien'&&db.entretien.articles.some(a=>a.photo);const rowH=hasPhotos?16:8;doc.autoTable({startY:y,head:[hasPhotos?['Photo','Ref','Article','Fourn','Qte','Seuil','Etat']:['Ref','Article','Fourn','Qte','Seuil','Etat']],body:rows,theme:'striped',headStyles:{fillColor:mod.color,fontSize:9,fontStyle:'bold'},styles:{fontSize:8,cellPadding:3,minCellHeight:hasPhotos?rowH:6},columnStyles:hasPhotos?{0:{cellWidth:16},1:{cellWidth:14},2:{cellWidth:68},3:{cellWidth:12,halign:'center'},4:{cellWidth:12,halign:'center'},5:{cellWidth:12,halign:'center'},6:{cellWidth:22,halign:'center'}}:{0:{cellWidth:14},1:{cellWidth:80},2:{cellWidth:12,halign:'center'},3:{cellWidth:12,halign:'center'},4:{cellWidth:12,halign:'center'},5:{cellWidth:22,halign:'center'}},margin:{left:14,right:14},didParseCell:function(data){const eIdx=hasPhotos?6:5;if(data.column.index===eIdx&&data.section==='body'){const e=data.cell.text[0];if(e==='RUPTURE'){data.cell.styles.fillColor=[220,53,69];data.cell.styles.textColor=[255,255,255];}else if(e==='STOCK BAS'){data.cell.styles.fillColor=[255,193,7];data.cell.styles.textColor=[0,0,0];}else if(e==='OK'){data.cell.styles.fillColor=[40,167,69];data.cell.styles.textColor=[255,255,255];}}},didDrawCell:function(data){
+async function quickGenerateAlertesPDF(){const mods=Array.from(document.querySelectorAll('.quickMod:checked')).map(c=>c.value);if(!mods.length){showToast('Module manquant','Sélectionnez au moins un module','⚠️');return;}showSplashPDF();await new Promise(r=>setTimeout(r,400));const{jsPDF}=window.jspdf;const doc=new jsPDF();let y=20;doc.setFontSize(18);doc.setFont(undefined,'bold');doc.setTextColor(220,38,38);doc.text('Etat du Stock - Actifs',105,y,{align:'center'});y+=8;doc.setFontSize(9);doc.setFont(undefined,'normal');doc.setTextColor(100,100,100);doc.text('Généré le '+new Date().toLocaleDateString()+' à '+new Date().toLocaleTimeString(),105,y,{align:'center'});y+=12;const etatLabel=(qty,seuil)=>qty===0?'RUPTURE':qty<=seuil?'STOCK BAS':'OK';let hasData=false;
+  // Pré-charge toutes les photos entretien en base64 AVANT de générer le tableau
+  const photoCache={};
+  if(mods.includes('entretien')){
+    const artsWithPhoto=db.entretien.articles.filter(a=>a.actif!==false&&a.photo);
+    await Promise.all(artsWithPhoto.map(async a=>{
+      const b64=await loadImgForPDF(a.photo);
+      if(b64)photoCache[a.id]=b64;
+    }));
+  }
+  const modsStock=[{key:'entretien',label:'ENTRETIEN (actifs)',color:[44,123,229],rows:()=>{const r=[];const cats=[...new Set(db.entretien.articles.filter(a=>a.actif!==false).map(a=>a.category))];cats.forEach(catId=>{const cat=db.categories.find(c=>c.id===catId);const arts=db.entretien.articles.filter(a=>a.category===catId&&a.actif!==false);if(!arts.length)return;r.push([{content:(cat?cat.name:catId).toUpperCase(),colSpan:6,styles:{fillColor:[45,31,94],textColor:[196,181,253],fontStyle:'bold',fontSize:9}}]);arts.forEach(a=>{const fourn=(db.fournisseurs||[]).find(f=>f.id===a.fournisseurId);const fournInitial=fourn?fourn.nom.charAt(0).toUpperCase():'?';const row=[a.ref||'-',a.name,fourn?fournInitial:'-',a.qty.toString(),a.seuil.toString(),etatLabel(a.qty,a.seuil)];row._artId=a.id;r.push(row);});});return r;}},{key:'epi',label:'EPI',color:[102,126,234],rows:()=>{const r=[];db.epi.articles.forEach(a=>{Object.entries(a.sizes||{}).forEach(([s,v])=>{r.push([a.ref||'-',a.name+' T.'+s,v.qty.toString(),v.seuil.toString(),etatLabel(v.qty,v.seuil)])})});return r;}},{key:'animation',label:'ANIMATION',color:[240,147,251],rows:()=>db.animation.articles.map(a=>['-',a.name,a.qty.toString(),a.seuil.toString(),etatLabel(a.qty,a.seuil)])},{key:'prefa',label:'🏗 PRÉFA',color:[168,218,220],rows:()=>db.prefa.articles.map(a=>['-',a.name,a.qty.toString(),a.seuil.toString(),etatLabel(a.qty,a.seuil)])},{key:'deguisements',label:'🎭 DÉGUISEMENTS',color:[255,107,107],rows:()=>db.deguisements.articles.map(a=>['-',a.name,a.qty.toString(),a.seuil.toString(),etatLabel(a.qty,a.seuil)])}];modsStock.forEach(mod=>{if(!mods.includes(mod.key))return;const rows=mod.rows();if(!rows.length)return;hasData=true;if(y>240){doc.addPage();y=20;}doc.setFontSize(12);doc.setFont(undefined,'bold');doc.setTextColor(mod.color[0],mod.color[1],mod.color[2]);doc.setFont(undefined,'bold');doc.text(mod.label,14,y);doc.setTextColor(0,0,0);y+=2;const hasPhotos=mod.key==='entretien'&&db.entretien.articles.some(a=>a.photo);const rowH=hasPhotos?16:8;doc.autoTable({startY:y,head:[hasPhotos?['Photo','Ref','Article','Fourn','Qte','Seuil','Etat']:['Ref','Article','Fourn','Qte','Seuil','Etat']],body:rows,theme:'striped',headStyles:{fillColor:mod.color,fontSize:9,fontStyle:'bold'},styles:{fontSize:8,cellPadding:3,minCellHeight:hasPhotos?rowH:6},columnStyles:hasPhotos?{0:{cellWidth:16},1:{cellWidth:14},2:{cellWidth:68},3:{cellWidth:12,halign:'center'},4:{cellWidth:12,halign:'center'},5:{cellWidth:12,halign:'center'},6:{cellWidth:22,halign:'center'}}:{0:{cellWidth:14},1:{cellWidth:80},2:{cellWidth:12,halign:'center'},3:{cellWidth:12,halign:'center'},4:{cellWidth:12,halign:'center'},5:{cellWidth:22,halign:'center'}},margin:{left:14,right:14},didParseCell:function(data){const eIdx=hasPhotos?6:5;if(data.column.index===eIdx&&data.section==='body'){const e=data.cell.text[0];if(e==='RUPTURE'){data.cell.styles.fillColor=[220,53,69];data.cell.styles.textColor=[255,255,255];}else if(e==='STOCK BAS'){data.cell.styles.fillColor=[255,193,7];data.cell.styles.textColor=[0,0,0];}else if(e==='OK'){data.cell.styles.fillColor=[40,167,69];data.cell.styles.textColor=[255,255,255];}}},didDrawCell:function(data){
   if(data.section!=='body')return;
   const photoCol=hasPhotos?0:-1;
   const fournCol=hasPhotos?3:2;
   if(data.column.index===photoCol&&hasPhotos){
-    const rowIdx=data.row.index;
-    const art=db.entretien.articles.filter(a=>a.actif!==false)[rowIdx];
-    if(art&&art.photo&&(art.photo.startsWith('data:')||art.photo.startsWith('http'))){
-      try{doc.addImage(art.photo,data.cell.x+1,data.cell.y+1,12,data.cell.height-2,'','FAST');}catch(e){}
+    const rowData=rows[data.row.index];
+    const artId=rowData&&rowData._artId;
+    const b64=artId&&photoCache[artId];
+    if(b64){
+      try{doc.addImage(b64,data.cell.x+1,data.cell.y+1,12,data.cell.height-2,'','FAST');}catch(e){}
     }
   }
   if(data.column.index===fournCol){
