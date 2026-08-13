@@ -180,13 +180,74 @@ const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSI
 const CLOUDINARY_CLOUD='doxu4sdwo';
 const CLOUDINARY_PRESET='deas_upload';
 async function supabaseSave(data,showSplash=false){
-  // [AMÉLIORATION 5] Ajout de _savedAt pour la comparaison de dates au chargement
-  function _strip(o){if(!o||typeof o!=='object')return o;if(Array.isArray(o))return o.map(_strip);const r={};for(const k in o){if(k==='photo'&&typeof o[k]==='string'&&o[k].startsWith('data:'))r[k]='';else r[k]=_strip(o[k]);}return r;}function _lim(a){return Array.isArray(a)?a.slice(-200):a;}const cleanData=_strip({...data,_savedAt:new Date().toISOString(),entretien:{...data.entretien,mouvements:_lim(data.entretien?.mouvements)},epi:{...data.epi,mouvements:_lim(data.epi?.mouvements)},animation:{...data.animation,mouvements:_lim(data.animation?.mouvements)},prefa:{...data.prefa,mouvements:_lim(data.prefa?.mouvements)},deguisements:{...data.deguisements,mouvements:_lim(data.deguisements?.mouvements)},epicerie:{...data.epicerie,mouvements:_lim(data.epicerie?.mouvements)}});const payload={id:'main',data:cleanData,updated_at:new Date().toISOString()};
-  if(showSplash)showSplashSync();try{const r=await fetch(SUPABASE_URL+'/rest/v1/deas_data',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(payload)});if(!r.ok)throw new Error(r.status);const t=new Date();if(showSplash)setTimeout(()=>hideSplashTheme(),600);finishProgressBar(true);updateSyncIndicator(true,t.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}),t.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}));}catch(e){if(showSplash)setTimeout(()=>hideSplashTheme(),600);finishProgressBar(false);console.warn('Supabase save:',e.message);updateSyncIndicator(false);}
+  // Synchronisation Cloud sécurisée : une sauvegarde n'est considérée comme réussie
+  // qu'après vérification que Supabase contient réellement la donnée envoyée.
+  function _strip(o){if(!o||typeof o!=='object')return o;if(Array.isArray(o))return o.map(_strip);const r={};for(const k in o){if(k==='photo'&&typeof o[k]==='string'&&o[k].startsWith('data:'))r[k]='';else r[k]=_strip(o[k]);}return r;}
+  function _lim(a){return Array.isArray(a)?a.slice(-200):a;}
+  const now=new Date().toISOString();
+  const cleanData=_strip({...data,_savedAt:now,
+    entretien:{...data.entretien,mouvements:_lim(data.entretien?.mouvements)},
+    epi:{...data.epi,mouvements:_lim(data.epi?.mouvements)},
+    animation:{...data.animation,mouvements:_lim(data.animation?.mouvements)},
+    prefa:{...data.prefa,mouvements:_lim(data.prefa?.mouvements)},
+    deguisements:{...data.deguisements,mouvements:_lim(data.deguisements?.mouvements)},
+    epicerie:{...data.epicerie,mouvements:_lim(data.epicerie?.mouvements)}});
+  const payload={id:'main',data:cleanData,updated_at:now};
+  if(showSplash)showSplashSync();
+  try{
+    const r=await fetch(SUPABASE_URL+'/rest/v1/deas_data',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Prefer':'resolution=merge-duplicates,return=representation'},
+      body:JSON.stringify(payload)
+    });
+    if(!r.ok){
+      let detail='HTTP '+r.status;
+      try{const body=await r.json();detail=body.message||body.hint||body.details||body.error||detail;}catch(_){try{const txt=await r.text();if(txt)detail=txt;}catch(__){}}
+      throw new Error(detail);
+    }
+    // Vérification réelle : le Cloud doit contenir une ligne main non vide.
+    const verifyCtrl=new AbortController();
+    const verifyTimer=setTimeout(()=>verifyCtrl.abort(),5000);
+    let verify;
+    try{
+      verify=await fetch(SUPABASE_URL+'/rest/v1/deas_data?id=eq.main&select=data,updated_at',{headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY},signal:verifyCtrl.signal,cache:'no-store'});
+    }finally{clearTimeout(verifyTimer);}
+    if(!verify.ok)throw new Error('Vérification Cloud impossible (HTTP '+verify.status+')');
+    const rows=await verify.json();
+    if(!rows||!rows.length||!rows[0].data||Object.keys(rows[0].data).length===0){
+      throw new Error('Supabase n\'a pas confirmé l\'enregistrement des données.');
+    }
+    // On ne met à jour le timestamp local qu'après confirmation du Cloud.
+    if(data&&typeof data==='object')data._savedAt=now;
+    if(showSplash)setTimeout(()=>hideSplashTheme(),600);
+    finishProgressBar(true);
+    const t=new Date();
+    updateSyncIndicator(true,t.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}),t.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}));
+    return {ok:true,updated_at:rows[0].updated_at||now};
+  }catch(e){
+    if(showSplash)setTimeout(()=>hideSplashTheme(),600);
+    finishProgressBar(false);
+    console.warn('Supabase save:',e.message);
+    updateSyncIndicator(false);
+    throw e;
+  }
 }
-async function supabaseLoad(){try{const r=await fetch(SUPABASE_URL+'/rest/v1/deas_data?id=eq.main&select=data,updated_at',{headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY}});if(!r.ok)throw new Error(r.status);const rows=await r.json();if(rows&&rows.length>0&&rows[0].data&&Object.keys(rows[0].data).length>0){return rows[0].data;}return null;}catch(e){console.warn('Supabase load:',e.message);return null;}}
+async function supabaseLoad(){try{const r=await fetch(SUPABASE_URL+'/rest/v1/deas_data?id=eq.main&select=data,updated_at',{headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY},cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);const rows=await r.json();if(rows&&rows.length>0&&rows[0].data&&Object.keys(rows[0].data).length>0){return rows[0].data;}return null;}catch(e){console.warn('Supabase load:',e.message);return null;}}
 // [FIX BUG ROUGE 4 + AMÉLIORATION 2] supabaseLoad avec retour de la date updated_at pour comparaison
-async function supabaseLoadWithDate(){try{const ctrl=new AbortController();setTimeout(()=>ctrl.abort(),5000);const r=await fetch(SUPABASE_URL+'/rest/v1/deas_data?id=eq.main&select=data,updated_at',{headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY},signal:ctrl.signal});if(!r.ok)throw new Error(r.status);const rows=await r.json();if(rows&&rows.length>0&&rows[0].data&&Object.keys(rows[0].data).length>0){return{data:rows[0].data,updated_at:rows[0].updated_at};}return null;}catch(e){console.warn('Supabase load:',e.message);return null;}}
+async function supabaseLoadWithDate(){
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),5000);
+  try{
+    const r=await fetch(SUPABASE_URL+'/rest/v1/deas_data?id=eq.main&select=data,updated_at',{headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY},signal:ctrl.signal,cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const rows=await r.json();
+    if(rows&&rows.length>0&&rows[0].data&&Object.keys(rows[0].data).length>0){return{data:rows[0].data,updated_at:rows[0].updated_at};}
+    return null; // Cloud réellement vide
+  }catch(e){
+    console.warn('Supabase load:',e.message);
+    throw e; // Important : ne plus confondre "Cloud vide" et "Cloud inaccessible"
+  }finally{clearTimeout(timer);}
+}
 // [AMÉLIORATION 2] Affichage de la date cloud dans l'indicateur de synchronisation
 // _syncInitDone : évite d'afficher "Hors ligne" pendant le chargement initial
 let _syncInitDone=false;
@@ -2343,13 +2404,11 @@ async function forceSyncLocalToCloud(){
   showLoad();
   try{
     await supabaseSave(db,true);
-    finishProgressBar(true);
-    showToast('Sync forcée','Données locales envoyées au cloud ✅','☁️');
-    updateSyncIndicator(true,new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}),new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}));
+    showToast('Synchronisation réussie','Le Cloud a bien reçu vos données ✅','☁️');
   }catch(e){
     finishProgressBar(false);
     console.error('Sync error:',e);
-    showToast('Erreur sync',e.message||'Vérifiez votre connexion','❌');
+    showToast('Échec synchronisation',e.message||'Le Cloud n\'a pas confirmé l\'enregistrement','❌');
   }finally{hideLoad();}
 }
 async function forceSyncCloudToLocal(){
@@ -2365,13 +2424,13 @@ async function forceSyncCloudToLocal(){
       showToast('Sync cloud → local','Données cloud chargées ('+dateStr+')','☁️');
       setTimeout(()=>location.reload(),1500);
     }else{
-      showToast('Cloud vide','Aucune donnée trouvée sur le cloud','⚠️');
+      showToast('Cloud vide','Aucune donnée trouvée sur le cloud. Vos données locales sont conservées.','⚠️');
     }
   }catch(e){
-    showToast('Erreur sync','Vérifiez votre connexion','❌');
+    console.error('Cloud → Local:',e);
+    showToast('Cloud inaccessible',e.message||'Impossible de contacter le Cloud. Vos données locales sont conservées.','❌');
   }finally{hideLoad();}
 }
-
 // ============================================================
 // ALIAS ET FONCTIONS MANQUANTES — AUDIT COMPLET
 // ============================================================
