@@ -2640,17 +2640,22 @@ function openEntretienTechnique(index){
  <p id="etStatus" role="status" style="font-size:12px;color:#fcd34d"></p>
  <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px"><button id="etCancel" type="button" class="cc-tbtn">Annuler</button><button id="etSave" type="button" class="cc-tbtn" style="background:#7c3aed;color:white">💾 Enregistrer</button></div></div>`;
  document.body.appendChild(overlay);
- let pending=article.ficheTechnique||null,reading=false;
+ let pending=article.ficheTechnique||null,reading=false,previewUrl=null;
  const get=id=>overlay.querySelector('#'+id), status=get('etStatus');
  get('etCompatibility').value=article.compatibiliteEntretien||'';
  function close(){overlay.remove();}
+ const previewCleanup=new MutationObserver(()=>{if(!overlay.isConnected){if(previewUrl)URL.revokeObjectURL(previewUrl);previewCleanup.disconnect();}});previewCleanup.observe(document.body,{childList:true,subtree:true});
  get('etClose').onclick=close;get('etCancel').onclick=close;
  function showDocument(){
-  const holder=get('etDocument');holder.replaceChildren();
+  const holder=get('etDocument');holder.replaceChildren();if(previewUrl){URL.revokeObjectURL(previewUrl);previewUrl=null;}
   if(!pending){holder.textContent='Aucun PDF ajouté';return;}
   const label=document.createElement('span');label.textContent='📄 '+pending.name;holder.appendChild(label);
-  const open=document.createElement('button');open.type='button';open.textContent='Ouvrir / télécharger';open.className='cc-tbtn';
-  open.onclick=()=>{try{const bytes=Uint8Array.from(atob(pending.data.split(',')[1]),c=>c.charCodeAt(0));const url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));const link=document.createElement('a');link.href=url;link.download=pending.name;link.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}catch(e){status.textContent='Impossible de lire ce PDF. Ajoutez-le à nouveau.';}};holder.appendChild(open);
+  try{
+   const bytes=Uint8Array.from(atob(pending.data.split(',')[1]),c=>c.charCodeAt(0));
+   previewUrl=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
+   const open=document.createElement('a');open.textContent='↗ Voir en grand';open.className='cc-tbtn';open.href=previewUrl;open.target='_blank';open.rel='noopener';holder.appendChild(open);
+   const frame=document.createElement('iframe');frame.title='Aperçu de la fiche technique PDF';frame.src=previewUrl;frame.style.cssText='width:100%;height:52vh;border:1px solid #4c1d95;border-radius:10px;background:white;order:2';holder.appendChild(frame);
+  }catch(e){status.textContent='Impossible de lire ce PDF. Ajoutez-le à nouveau.';}
   const remove=document.createElement('button');remove.type='button';remove.textContent='Retirer';remove.className='cc-tbtn';remove.onclick=()=>{pending=null;get('etFile').value='';showDocument();};holder.appendChild(remove);
  }
  async function readPdf(file){
