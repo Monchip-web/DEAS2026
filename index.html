@@ -2623,6 +2623,41 @@ function calcCmdServ(){var anneeDe=parseInt((document.getElementById('csAnneeDe'
 <script>
 // Entretien uniquement : pièces jointes et compatibilités facultatives.
 function entretienTechEscape(value){return String(value||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+// Fiches techniques : les PDF sont stockés dans Supabase Storage (bucket « fiches »),
+// seul un petit lien est gardé dans les données de l'article.
+function _ficheDataUrlToBlob(dataUrl){const b64=String(dataUrl).split(',')[1]||'';const bin=atob(b64);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);return new Blob([bytes],{type:'application/pdf'});}
+async function ficheUploadStorage(articleId,dataUrl){
+ const path='entretien/'+String(articleId).replace(/[^A-Za-z0-9_-]/g,'')+'_'+Date.now()+'.pdf';
+ const r=await fetch(SUPABASE_URL+'/storage/v1/object/fiches/'+path,{method:'POST',headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Content-Type':'application/pdf','x-upsert':'false'},body:_ficheDataUrlToBlob(dataUrl)});
+ if(!r.ok){let d='HTTP '+r.status;try{const j=await r.json();d=j.message||j.error||d;}catch(_){}throw new Error(d);}
+ return SUPABASE_URL+'/storage/v1/object/public/fiches/'+path;
+}
+let _ficheMigrating=false,_ficheMigToastShown=false,_ficheMigNext=0;
+async function migrerFichesTechniques(){
+ if(_ficheMigrating||Date.now()<_ficheMigNext)return;
+ if(typeof db==='undefined'||!db||!db.entretien||!Array.isArray(db.entretien.articles))return;
+ const todo=db.entretien.articles.filter(a=>a&&a.ficheTechnique&&a.ficheTechnique.data&&!a.ficheTechnique.url).map(a=>a.id);
+ if(!todo.length)return;
+ _ficheMigrating=true;let ok=0;
+ try{showToast('Fiches techniques','Déplacement de '+todo.length+' fiche(s) vers le cloud…','📄');}catch(_){}
+ try{
+  for(const id of todo){
+   const art=db.entretien.articles.find(a=>a.id===id);
+   if(!art||!art.ficheTechnique||!art.ficheTechnique.data||art.ficheTechnique.url)continue;
+   const name=art.ficheTechnique.name,data=art.ficheTechnique.data;
+   const url=await ficheUploadStorage(id,data);
+   const again=db.entretien.articles.find(a=>a.id===id);
+   if(again&&again.ficheTechnique&&again.ficheTechnique.data){again.ficheTechnique={name:name,url:url};ok++;await saveDB(db);}
+  }
+ }catch(e){
+  console.warn('Migration fiches techniques:',e.message);_ficheMigNext=Date.now()+120000;
+  if(!_ficheMigToastShown){_ficheMigToastShown=true;try{showToast('Fiches techniques','Envoi impossible pour le moment ('+e.message+'). Vos PDF restent sur cet appareil.','⚠️');}catch(_){}}
+ }finally{
+  _ficheMigrating=false;
+  if(ok){try{await saveDB(db);scheduleSyncDebounce();filterAndRenderEntretien();showToast('Fiches techniques',ok+' fiche(s) déplacée(s) vers le cloud ☁️','📄');}catch(_){}}
+ }
+}
+setInterval(migrerFichesTechniques,10000);
 function openEntretienTechnique(index){
  const article=db.entretien.articles[index];if(!article)return;
  document.getElementById('entretienTechOverlay')?.remove();
@@ -2650,12 +2685,15 @@ function openEntretienTechnique(index){
   const holder=get('etDocument');holder.replaceChildren();if(previewUrl){URL.revokeObjectURL(previewUrl);previewUrl=null;}
   if(!pending){holder.textContent='Aucun PDF ajouté';return;}
   const label=document.createElement('span');label.textContent='📄 '+pending.name;holder.appendChild(label);
-  try{
-   const bytes=Uint8Array.from(atob(pending.data.split(',')[1]),c=>c.charCodeAt(0));
-   previewUrl=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
-   const open=document.createElement('a');open.textContent='↗ Voir en grand';open.className='cc-tbtn';open.href=previewUrl;open.target='_blank';open.rel='noopener';holder.appendChild(open);
-   const frame=document.createElement('iframe');frame.title='Aperçu de la fiche technique PDF';frame.src=previewUrl;frame.style.cssText='width:100%;height:52vh;border:1px solid #4c1d95;border-radius:10px;background:white;order:2';holder.appendChild(frame);
-  }catch(e){status.textContent='Impossible de lire ce PDF. Ajoutez-le à nouveau.';}
+  const attach=u=>{previewUrl=u;
+   const open=document.createElement('a');open.textContent='↗ Voir en grand';open.className='cc-tbtn';open.href=u;open.target='_blank';open.rel='noopener';holder.appendChild(open);
+   const frame=document.createElement('iframe');frame.title='Aperçu de la fiche technique PDF';frame.src=u;frame.style.cssText='width:100%;height:52vh;border:1px solid #4c1d95;border-radius:10px;background:white;order:2';holder.appendChild(frame);};
+  if(pending.url){const mine=pending;status.textContent='Chargement du PDF…';
+   fetch(pending.url).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.blob();}).then(b=>{if(pending!==mine||!overlay.isConnected)return;status.textContent='';attach(URL.createObjectURL(new Blob([b],{type:'application/pdf'})));}).catch(()=>{status.textContent='Impossible de charger ce PDF.';});
+  }else{
+   try{const bytes=Uint8Array.from(atob(pending.data.split(',')[1]),c=>c.charCodeAt(0));attach(URL.createObjectURL(new Blob([bytes],{type:'application/pdf'})));}
+   catch(e){status.textContent='Impossible de lire ce PDF. Ajoutez-le à nouveau.';}
+  }
   const remove=document.createElement('button');remove.type='button';remove.textContent='Retirer';remove.className='cc-tbtn';remove.onclick=()=>{pending=null;get('etFile').value='';showDocument();};holder.appendChild(remove);
  }
  async function readPdf(file){
@@ -2674,6 +2712,7 @@ function openEntretienTechnique(index){
  drop.ondrop=e=>{e.preventDefault();drop.style.background='';readPdf(e.dataTransfer.files[0]);};
  get('etSave').onclick=async()=>{
   if(reading)return;const current=db.entretien.articles.find(a=>a.id===article.id);if(!current){status.textContent='Cet article a été supprimé.';return;}
+  if(pending&&pending.data&&!pending.url){get('etSave').disabled=true;status.textContent='Envoi du PDF…';try{const u=await ficheUploadStorage(article.id,pending.data);pending={name:pending.name,url:u};}catch(e){status.textContent='Envoi du PDF impossible : '+e.message+'. Vos informations restent dans cette fenêtre.';get('etSave').disabled=false;return;}}
   const previousPdf=current.ficheTechnique,previousCompatibility=current.compatibiliteEntretien;
   current.ficheTechnique=pending;current.compatibiliteEntretien=get('etCompatibility').value.trim();get('etSave').disabled=true;
   try{await saveDB(db);lastSaveTime=Date.now();updateSaveIndicator();scheduleSyncDebounce();close();filterAndRenderEntretien();showToast('Fiche enregistrée','PDF et compatibilités conservés','📄');}
